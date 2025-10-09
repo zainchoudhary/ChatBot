@@ -4,6 +4,7 @@ import PyPDF2
 import docx
 import sqlite3
 import datetime
+import os
 
 def init_db():
     conn = sqlite3.connect("chatbot.db")
@@ -30,12 +31,27 @@ def save_message(role, message):
     conn.close()
 
 def load_messages():
+    try:
+        conn = sqlite3.connect("chatbot.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT role, message FROM chat_history ORDER BY id ASC")
+        messages = cursor.fetchall()
+        conn.close()
+        return [{"role": role, "content": msg} for role, msg in messages]
+    except Exception as e:
+        print("Error loading messages:", e)
+        return []
+
+def clear_chat_history():
     conn = sqlite3.connect("chatbot.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT role, message FROM chat_history ORDER BY id ASC")
-    messages = cursor.fetchall()
+    cursor.execute("DELETE FROM chat_history")
+    conn.commit()
     conn.close()
-    return [{"role": role, "content": msg} for role, msg in messages]
+    st.session_state.messages = []
+    st.success("Chat history cleared!")
+    st.rerun()
+
 
 def extract_text_from_pdf(file):
     """Extract text from a PDF file."""
@@ -134,7 +150,7 @@ def init_chat():
         st.session_state.file_context = ""
 
 def handle_user_input():
-    user_input = st.chat_input("Ask anything...")
+    user_input = st.chat_input("💬 Ask anything...")
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
         save_message("user", user_input)
@@ -145,9 +161,14 @@ def handle_user_input():
         save_message("ai", llm_reply)
         st.rerun()
 
-init_db()
+if not os.path.exists("chatbot.db"):
+    init_db()
+else:
+    init_db()
+
 genai.configure(api_key="AIzaSyC59fJluw0VU9RQFnbj0nBzqvKy6j9Mtvo")
 model = genai.GenerativeModel(model_name="gemini-2.5-flash")
+
 set_custom_styles()
 render_title()
 render_file_upload_section()
@@ -160,5 +181,9 @@ if file_text:
     st.success("File content loaded successfully!")
     st.info("Now you can ask questions based on the uploaded file.")
 
+if st.button("🧹 Clear Chat History"):
+    clear_chat_history()
+
 render_chat_messages(st.session_state.messages)
+
 handle_user_input()
