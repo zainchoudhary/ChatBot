@@ -4,92 +4,83 @@ import PyPDF2
 import docx
 import sqlite3
 import datetime
+import os
 import uuid
-import threading
 
 # ---------------- CONFIG ----------------
 genai.configure(api_key="AIzaSyC59fJluw0VU9RQFnbj0nBzqvKy6j9Mtvo")
-DB_NAME = "chatbot.db"
-db_lock = threading.Lock()  # Thread-safe SQLite access
+DB_NAME = os.path.join(os.path.dirname(__file__), "chatbot.db")  # Absolute path
 
 # ---------------- DATABASE ----------------
 def init_db():
-    with db_lock:
-        conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("""
-                       CREATE TABLE IF NOT EXISTS chat_history(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT,
-                role TEXT,
-                message TEXT,
-                timestamp TEXT
-                       )
-        """)
-        conn.commit()
-        conn.close()
+    # Persistent connection stored in session state
+    if "conn" not in st.session_state:
+        st.session_state.conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+    conn = st.session_state.conn
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            role TEXT,
+            message TEXT,
+            timestamp TEXT
+        )
+    """)
+    conn.commit()
 
 def migrate_db():
     """Add user_id column if missing and assign 'default' to old messages"""
-    with db_lock:
-        conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(chat_history)")
-        columns = [col[1] for col in cursor.fetchall()]
-        if "user_id" not in columns:
-            cursor.execute("ALTER TABLE chat_history ADD COLUMN user_id TEXT")
-            cursor.execute("UPDATE chat_history SET user_id='default'")  # Preserve old messages
-            conn.commit()
-        conn.close()
+    conn = st.session_state.conn
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(chat_history)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if "user_id" not in columns:
+        cursor.execute("ALTER TABLE chat_history ADD COLUMN user_id TEXT")
+        cursor.execute("UPDATE chat_history SET user_id='default'")  # Preserve old messages
+        conn.commit()
 
 def save_message(role, message):
     try:
-        with db_lock:
-            conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO chat_history (user_id, role, message, timestamp) VALUES (?, ?, ?, ?)",
-                (st.session_state.user_id, role, message, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            )
-            conn.commit()
-            conn.close()
+        conn = st.session_state.conn
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO chat_history (user_id, role, message, timestamp) VALUES (?, ?, ?, ?)",
+            (st.session_state.user_id, role, message, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        )
+        conn.commit()
     except Exception as e:
         st.error(f"Database error (save_message): {e}")
 
 def load_messages():
     """Load messages for the current user plus old default messages"""
     try:
-        with db_lock:
-            conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(chat_history)")
-            columns = [col[1] for col in cursor.fetchall()]
-            if "user_id" in columns:
-                cursor.execute(
-                    "SELECT role, message FROM chat_history WHERE user_id=? OR user_id='default' ORDER BY id ASC",
-                    (st.session_state.user_id,)
-                )
-            else:
-                # No user_id column: load all messages
-                cursor.execute("SELECT role, message FROM chat_history ORDER BY id ASC")
-            messages = cursor.fetchall()
-            conn.close()
-            return [{"role": role, "content": msg} for role, msg in messages]
+        conn = st.session_state.conn
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(chat_history)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if "user_id" in columns:
+            cursor.execute(
+                "SELECT role, message FROM chat_history WHERE user_id=? OR user_id='default' ORDER BY id ASC",
+                (st.session_state.user_id,)
+            )
+        else:
+            cursor.execute("SELECT role, message FROM chat_history ORDER BY id ASC")
+        messages = cursor.fetchall()
+        return [{"role": role, "content": msg} for role, msg in messages]
     except Exception as e:
         st.error(f"Database error (load_messages): {e}")
         return []
 
 def clear_chat_history():
     try:
-        with db_lock:
-            conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-            cursor = conn.cursor()
-            cursor.execute(
-                "DELETE FROM chat_history WHERE user_id=?",
-                (st.session_state.user_id,)
-            )
-            conn.commit()
-            conn.close()
+        conn = st.session_state.conn
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM chat_history WHERE user_id=?",
+            (st.session_state.user_id,)
+        )
+        conn.commit()
         st.success("Your chat history has been cleared!")
         st.rerun()
     except Exception as e:
@@ -185,14 +176,11 @@ def render_chat_messages(messages):
             )
 
 def init_chat():
-    # Assign unique session id
     if "user_id" not in st.session_state:
         st.session_state.user_id = str(uuid.uuid4())
-    # Initialize chat model
     if "chat" not in st.session_state:
         st.session_state.chat = model.start_chat()
         st.session_state.chat.send_message("You are a helpful assistant.")
-    # File context
     if "file_context" not in st.session_state:
         st.session_state.file_context = ""
 
