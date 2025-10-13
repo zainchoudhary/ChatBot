@@ -2,10 +2,10 @@ streamlit
 google-generativeai
 PyPDF2
 python-docx
-langchain openai
+langchain
+openai
 faiss-cpu
 chromadb
 sentence-transformers
-tiktoken
 pinecone-client
 sentence-transformers
