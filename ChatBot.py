@@ -6,6 +6,8 @@ import sqlite3
 import datetime
 import os
 
+genai.configure(api_key="AIzaSyC59fJluw0VU9RQFnbj0nBzqvKy6j9Mtvo")
+
 def init_db():
     conn = sqlite3.connect("chatbot.db")
     cursor = conn.cursor()
@@ -54,7 +56,6 @@ def clear_chat_history():
 
 
 def extract_text_from_pdf(file):
-    """Extract text from a PDF file."""
     pdf_reader = PyPDF2.PdfReader(file)
     return "".join(page.extract_text() for page in pdf_reader.pages)
 
@@ -149,24 +150,106 @@ def init_chat():
     if "file_context" not in st.session_state:
         st.session_state.file_context = ""
 
+def show_typing_animation():
+    placeholder = st.empty()
+    typing_html = """
+    <div style="display: flex; justify-content: flex-start; margin: 10px 0;">
+        <div style="
+            display: inline-flex;
+            align-items: center;
+            background-color: #3E494D;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 15px;
+            max-width: 60%;
+            word-wrap: break-word;
+        ">
+            <div class="typing-indicator" style="display: flex; gap: 4px;">
+                <span style="
+                    width: 8px; height: 8px;
+                    background-color: #ccc;
+                    border-radius: 50%;
+                    display: inline-block;
+                    animation: blink 1s infinite 0s;
+                "></span>
+                <span style="
+                    width: 8px; height: 8px;
+                    background-color: #ccc;
+                    border-radius: 50%;
+                    display: inline-block;
+                    animation: blink 1s infinite 0.2s;
+                "></span>
+                <span style="
+                    width: 8px; height: 8px;
+                    background-color: #ccc;
+                    border-radius: 50%;
+                    display: inline-block;
+                    animation: blink 1s infinite 0.4s;
+                "></span>
+            </div>
+        </div>
+    </div>
+
+    <style>
+    @keyframes blink {
+        0% { opacity: 0.2; }
+        20% { opacity: 1; }
+        100% { opacity: 0.2; }
+    }
+    </style>
+    """
+    placeholder.markdown(typing_html, unsafe_allow_html=True)
+    return placeholder
+
 def handle_user_input():
     user_input = st.chat_input("💬 Ask anything...")
+
     if user_input:
+
         st.session_state.messages.append({"role": "user", "content": user_input})
         save_message("user", user_input)
 
+        st.markdown(
+            f"""
+            <div style="display: flex; justify-content: flex-end; margin: 10px 0;">
+                <div style="background-color: #C7C7C7; color:black; padding:10px 15px;
+                            border-radius:15px; max-width:60%; word-wrap:break-word;">
+                    {user_input}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+        typing_placeholder = show_typing_animation()
+
         response = st.session_state.chat.send_message(user_input)
         llm_reply = response.text
+
+        typing_placeholder.empty()
+
         st.session_state.messages.append({"role": "ai", "content": llm_reply})
         save_message("ai", llm_reply)
-        st.rerun()
+
+        st.markdown(
+            f"""
+            <div style="display: flex; justify-content: flex-start; margin: 10px 0;">
+                <div style="background-color: #3E494D; color:white; padding:10px 15px;
+                            border-radius:15px; max-width:60%; word-wrap:break-word;">
+                    {llm_reply}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
 
 if not os.path.exists("chatbot.db"):
     init_db()
 else:
     init_db()
 
-genai.configure(api_key="AIzaSyC59fJluw0VU9RQFnbj0nBzqvKy6j9Mtvo")
 model = genai.GenerativeModel(model_name="gemini-2.5-flash")
 
 set_custom_styles()
@@ -185,5 +268,4 @@ if st.button("🧹 Clear Chat History"):
     clear_chat_history()
 
 render_chat_messages(st.session_state.messages)
-
 handle_user_input()
