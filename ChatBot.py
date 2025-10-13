@@ -29,6 +29,19 @@ def init_db():
         conn.commit()
         conn.close()
 
+def migrate_db():
+    """Add user_id column if it doesn't exist and assign 'default' to old messages"""
+    with db_lock:
+        conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(chat_history)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if "user_id" not in columns:
+            cursor.execute("ALTER TABLE chat_history ADD COLUMN user_id TEXT")
+            cursor.execute("UPDATE chat_history SET user_id='default'")
+            conn.commit()
+        conn.close()
+
 def save_message(role, message):
     try:
         with db_lock:
@@ -48,8 +61,9 @@ def load_messages():
         with db_lock:
             conn = sqlite3.connect(DB_NAME, check_same_thread=False)
             cursor = conn.cursor()
+            # Load messages for this user + old default messages
             cursor.execute(
-                "SELECT role, message FROM chat_history WHERE user_id=? ORDER BY id ASC",
+                "SELECT role, message FROM chat_history WHERE user_id=? OR user_id='default' ORDER BY id ASC",
                 (st.session_state.user_id,)
             )
             messages = cursor.fetchall()
@@ -233,6 +247,7 @@ def handle_user_input():
 
 # ----------------- MAIN -----------------
 init_db()
+migrate_db()  # Migrate old DB safely
 model = genai.GenerativeModel(model_name="gemini-2.5-flash")
 
 set_custom_styles()
