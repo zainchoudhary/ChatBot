@@ -8,6 +8,8 @@ import os
 import uuid
 import html
 
+from streamlit import session_state
+
 # -------------------- DATABASE --------------------
 DB_PATH = "chatbot.db"
 
@@ -41,8 +43,7 @@ def load_messages():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT role, message FROM chat_history WHERE user_id = ? ORDER BY id ASC",
-            (st.session_state.user_id,)
+                f"SELECT * FROM chat_history WHERE user_id={session_state.user_id}"
         )
         messages = cursor.fetchall()
         conn.close()
@@ -136,7 +137,7 @@ def init_chat():
         st.session_state.chat = model.start_chat()
         st.session_state.chat.send_message("You are a helpful assistant.")
     if "messages" not in st.session_state:
-        st.session_state.messages = load_messages()
+        st.session_state.messages = []
     if "file_context" not in st.session_state:
         st.session_state.file_context = ""
 
