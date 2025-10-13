@@ -225,18 +225,26 @@ def handle_user_input():
     user_input = st.chat_input("💬 Ask anything...")
 
     if user_input:
-        # Append user message to session_state only
+        # Append user message to session_state
         st.session_state.messages.append({"role": "user", "content": user_input})
         save_message("user", user_input)
 
-        # Typing animation and AI response
+        # Immediately render messages so user sees their input
+        render_chat_messages(st.session_state.messages)
+
+        # Typing animation for AI response
         typing_placeholder = show_typing_animation()
         response = st.session_state.chat.send_message(user_input)
         llm_reply = response.text
         typing_placeholder.empty()
 
+        # Append AI response
         st.session_state.messages.append({"role": "ai", "content": llm_reply})
         save_message("ai", llm_reply)
+
+        # Render messages again to include AI response
+        render_chat_messages(st.session_state.messages)
+
 
 # ----------------- MAIN -----------------
 init_db()
