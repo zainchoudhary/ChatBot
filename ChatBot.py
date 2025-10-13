@@ -78,6 +78,8 @@ def clear_chat_history():
             (st.session_state.user_id,)
         )
         conn.commit()
+        # Clear in-memory messages
+        st.session_state.messages = []
         st.success("Your chat history has been cleared!")
         st.rerun()
     except Exception as e:
@@ -109,7 +111,6 @@ def handle_file_upload():
         # Save content per user
         st.session_state.uploaded_file_content[st.session_state.user_id] = text
         return text
-    # Return previous file content if exists
     return st.session_state.uploaded_file_content.get(st.session_state.user_id, "")
 
 # ---------------- STYLING ----------------
@@ -189,6 +190,8 @@ def init_chat():
         st.session_state.chat.send_message("You are a helpful assistant.")
     if "file_context" not in st.session_state:
         st.session_state.file_context = ""
+    if "messages" not in st.session_state:
+        st.session_state.messages = load_messages()
 
 def show_typing_animation():
     placeholder = st.empty()
@@ -221,17 +224,23 @@ def show_typing_animation():
 
 def handle_user_input():
     user_input = st.chat_input("💬 Ask anything...")
-    if user_input:
-        save_message("user", user_input)
 
+    if user_input:
+        # Display user input instantly
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        save_message("user", user_input)
+        render_chat_messages(st.session_state.messages)
+
+        # Typing animation
         typing_placeholder = show_typing_animation()
         response = st.session_state.chat.send_message(user_input)
         llm_reply = response.text
-        save_message("ai", llm_reply)
         typing_placeholder.empty()
 
-        messages_to_render = load_messages()
-        render_chat_messages(messages_to_render)
+        # AI response
+        st.session_state.messages.append({"role": "ai", "content": llm_reply})
+        save_message("ai", llm_reply)
+        render_chat_messages(st.session_state.messages)
 
 # ----------------- MAIN -----------------
 init_db()
@@ -251,12 +260,12 @@ if file_text:
     st.success("File content loaded successfully!")
     st.info("Now you can ask questions based on the uploaded file.")
 
-# Clear chat
+# Clear chat button
 if st.button("🧹 Clear Chat History"):
     clear_chat_history()
 
-# Load messages dynamically
-messages_to_render = load_messages()
-render_chat_messages(messages_to_render)
+# Render existing messages
+render_chat_messages(st.session_state.messages)
 
+# Handle user input
 handle_user_input()
