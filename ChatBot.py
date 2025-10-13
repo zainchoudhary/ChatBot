@@ -78,7 +78,6 @@ def clear_chat_history():
             (st.session_state.user_id,)
         )
         conn.commit()
-        # Clear in-memory messages
         st.session_state.messages = []
         st.success("Your chat history has been cleared!")
         st.rerun()
@@ -226,21 +225,18 @@ def handle_user_input():
     user_input = st.chat_input("💬 Ask anything...")
 
     if user_input:
-        # Display user input instantly
+        # Append user message to session_state only
         st.session_state.messages.append({"role": "user", "content": user_input})
         save_message("user", user_input)
-        render_chat_messages(st.session_state.messages)
 
-        # Typing animation
+        # Typing animation and AI response
         typing_placeholder = show_typing_animation()
         response = st.session_state.chat.send_message(user_input)
         llm_reply = response.text
         typing_placeholder.empty()
 
-        # AI response
         st.session_state.messages.append({"role": "ai", "content": llm_reply})
         save_message("ai", llm_reply)
-        render_chat_messages(st.session_state.messages)
 
 # ----------------- MAIN -----------------
 init_db()
@@ -264,8 +260,8 @@ if file_text:
 if st.button("🧹 Clear Chat History"):
     clear_chat_history()
 
-# Render existing messages
-render_chat_messages(st.session_state.messages)
-
 # Handle user input
 handle_user_input()
+
+# Render all messages once per rerun
+render_chat_messages(st.session_state.messages)
