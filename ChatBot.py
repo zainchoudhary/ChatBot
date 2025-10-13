@@ -13,7 +13,6 @@ DB_NAME = os.path.join(os.path.dirname(__file__), "chatbot.db")  # Absolute path
 
 # ---------------- DATABASE ----------------
 def init_db():
-    # Persistent connection stored in session state
     if "conn" not in st.session_state:
         st.session_state.conn = sqlite3.connect(DB_NAME, check_same_thread=False)
     conn = st.session_state.conn
@@ -30,14 +29,13 @@ def init_db():
     conn.commit()
 
 def migrate_db():
-    """Add user_id column if missing and assign 'default' to old messages"""
     conn = st.session_state.conn
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(chat_history)")
     columns = [col[1] for col in cursor.fetchall()]
     if "user_id" not in columns:
         cursor.execute("ALTER TABLE chat_history ADD COLUMN user_id TEXT")
-        cursor.execute("UPDATE chat_history SET user_id='default'")  # Preserve old messages
+        cursor.execute("UPDATE chat_history SET user_id='default'")
         conn.commit()
 
 def save_message(role, message):
@@ -53,7 +51,6 @@ def save_message(role, message):
         st.error(f"Database error (save_message): {e}")
 
 def load_messages():
-    """Load messages for the current user plus old default messages"""
     try:
         conn = st.session_state.conn
         cursor = conn.cursor()
@@ -96,15 +93,24 @@ def extract_text_from_docx(file):
     return "\n".join([para.text for para in doc.paragraphs])
 
 def handle_file_upload():
+    if "uploaded_file_content" not in st.session_state:
+        st.session_state.uploaded_file_content = {}
+
     uploaded_file = st.file_uploader("", type=["pdf", "docx"])
     if uploaded_file:
         if uploaded_file.type == "application/pdf":
-            return extract_text_from_pdf(uploaded_file)
+            text = extract_text_from_pdf(uploaded_file)
         elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            return extract_text_from_docx(uploaded_file)
+            text = extract_text_from_docx(uploaded_file)
         else:
             st.warning("Unsupported file type.")
-    return ""
+            return ""
+
+        # Save content per user
+        st.session_state.uploaded_file_content[st.session_state.user_id] = text
+        return text
+    # Return previous file content if exists
+    return st.session_state.uploaded_file_content.get(st.session_state.user_id, "")
 
 # ---------------- STYLING ----------------
 def set_custom_styles():
@@ -224,7 +230,6 @@ def handle_user_input():
         save_message("ai", llm_reply)
         typing_placeholder.empty()
 
-        # Reload messages dynamically
         messages_to_render = load_messages()
         render_chat_messages(messages_to_render)
 
@@ -238,7 +243,7 @@ render_title()
 render_file_upload_section()
 init_chat()
 
-# File upload
+# File upload (per user)
 file_text = handle_file_upload()
 if file_text:
     st.session_state.file_context = file_text
@@ -250,7 +255,7 @@ if file_text:
 if st.button("🧹 Clear Chat History"):
     clear_chat_history()
 
-# Load messages dynamically each time
+# Load messages dynamically
 messages_to_render = load_messages()
 render_chat_messages(messages_to_render)
 
