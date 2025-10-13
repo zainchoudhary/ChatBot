@@ -6,10 +6,13 @@ import sqlite3
 import datetime
 import os
 
+# ---------------- CONFIG ----------------
 genai.configure(api_key="AIzaSyC59fJluw0VU9RQFnbj0nBzqvKy6j9Mtvo")
+DB_NAME = "chatbot.db"
 
+# ---------------- DATABASE ----------------
 def init_db():
-    conn = sqlite3.connect("chatbot.db")
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS chat_history (
@@ -23,7 +26,7 @@ def init_db():
     conn.close()
 
 def save_message(role, message):
-    conn = sqlite3.connect("chatbot.db")
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(
         "INSERT INTO chat_history (role, message, timestamp) VALUES (?, ?, ?)",
@@ -32,29 +35,7 @@ def save_message(role, message):
     conn.commit()
     conn.close()
 
-def load_messages():
-    try:
-        conn = sqlite3.connect("chatbot.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT role, message FROM chat_history ORDER BY id ASC")
-        messages = cursor.fetchall()
-        conn.close()
-        return [{"role": role, "content": msg} for role, msg in messages]
-    except Exception as e:
-        print("Error loading messages:", e)
-        return []
-
-def clear_chat_history():
-    conn = sqlite3.connect("chatbot.db")
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM chat_history")
-    conn.commit()
-    conn.close()
-    st.session_state.messages = []
-    st.success("Chat history cleared!")
-    st.rerun()
-
-
+# ---------------- FILE HANDLING ----------------
 def extract_text_from_pdf(file):
     pdf_reader = PyPDF2.PdfReader(file)
     return "".join(page.extract_text() for page in pdf_reader.pages)
@@ -74,6 +55,7 @@ def handle_file_upload():
             st.warning("Unsupported file type.")
     return ""
 
+# ---------------- STYLING ----------------
 def set_custom_styles():
     st.markdown(
         """
@@ -114,6 +96,7 @@ def render_file_upload_section():
         unsafe_allow_html=True
     )
 
+# ---------------- CHAT ----------------
 def render_chat_messages(messages):
     for msg in messages:
         if msg["role"] == "user":
@@ -142,11 +125,12 @@ def render_chat_messages(messages):
             )
 
 def init_chat():
+    # Each new user starts a fresh session
     if "chat" not in st.session_state:
         st.session_state.chat = model.start_chat()
         st.session_state.chat.send_message("You are a helpful assistant.")
     if "messages" not in st.session_state:
-        st.session_state.messages = load_messages()
+        st.session_state.messages = []
     if "file_context" not in st.session_state:
         st.session_state.file_context = ""
 
@@ -165,37 +149,15 @@ def show_typing_animation():
             word-wrap: break-word;
         ">
             <div class="typing-indicator" style="display: flex; gap: 4px;">
-                <span style="
-                    width: 8px; height: 8px;
-                    background-color: #ccc;
-                    border-radius: 50%;
-                    display: inline-block;
-                    animation: blink 1s infinite 0s;
-                "></span>
-                <span style="
-                    width: 8px; height: 8px;
-                    background-color: #ccc;
-                    border-radius: 50%;
-                    display: inline-block;
-                    animation: blink 1s infinite 0.2s;
-                "></span>
-                <span style="
-                    width: 8px; height: 8px;
-                    background-color: #ccc;
-                    border-radius: 50%;
-                    display: inline-block;
-                    animation: blink 1s infinite 0.4s;
-                "></span>
+                <span style="width: 8px; height: 8px; background-color: #ccc; border-radius: 50%; display: inline-block; animation: blink 1s infinite 0s;"></span>
+                <span style="width: 8px; height: 8px; background-color: #ccc; border-radius: 50%; display: inline-block; animation: blink 1s infinite 0.2s;"></span>
+                <span style="width: 8px; height: 8px; background-color: #ccc; border-radius: 50%; display: inline-block; animation: blink 1s infinite 0.4s;"></span>
             </div>
         </div>
     </div>
 
     <style>
-    @keyframes blink {
-        0% { opacity: 0.2; }
-        20% { opacity: 1; }
-        100% { opacity: 0.2; }
-    }
+    @keyframes blink {0% { opacity: 0.2; } 20% { opacity: 1; } 100% { opacity: 0.2; }}
     </style>
     """
     placeholder.markdown(typing_html, unsafe_allow_html=True)
@@ -205,47 +167,29 @@ def handle_user_input():
     user_input = st.chat_input("💬 Ask anything...")
 
     if user_input:
-
+        # Append to session only (per-user)
         st.session_state.messages.append({"role": "user", "content": user_input})
-        save_message("user", user_input)
+        save_message("user", user_input)  # optional global log
 
-        st.markdown(
-            f"""
-            <div style="display: flex; justify-content: flex-end; margin: 10px 0;">
-                <div style="background-color: #C7C7C7; color:black; padding:10px 15px;
-                            border-radius:15px; max-width:60%; word-wrap:break-word;">
-                    {user_input}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
+        # Show user message immediately
+        render_chat_messages([{"role": "user", "content": user_input}])
 
         typing_placeholder = show_typing_animation()
 
+        # Generate AI response
         response = st.session_state.chat.send_message(user_input)
         llm_reply = response.text
 
         typing_placeholder.empty()
 
         st.session_state.messages.append({"role": "ai", "content": llm_reply})
-        save_message("ai", llm_reply)
+        save_message("ai", llm_reply)  # optional global log
 
-        st.markdown(
-            f"""
-            <div style="display: flex; justify-content: flex-start; margin: 10px 0;">
-                <div style="background-color: #3E494D; color:white; padding:10px 15px;
-                            border-radius:15px; max-width:60%; word-wrap:break-word;">
-                    {llm_reply}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        # Show AI message
+        render_chat_messages([{"role": "ai", "content": llm_reply}])
 
-
-if not os.path.exists("chatbot.db"):
+# ----------------- MAIN -----------------
+if not os.path.exists(DB_NAME):
     init_db()
 else:
     init_db()
@@ -257,6 +201,7 @@ render_title()
 render_file_upload_section()
 init_chat()
 
+# Handle file upload per user
 file_text = handle_file_upload()
 if file_text:
     st.session_state.file_context = file_text
@@ -264,8 +209,13 @@ if file_text:
     st.success("File content loaded successfully!")
     st.info("Now you can ask questions based on the uploaded file.")
 
-if st.button("🧹 Clear Chat History"):
-    clear_chat_history()
+# Clear chat per session (not global)
+if st.button("🧹 Clear Chat"):
+    st.session_state.messages = []
+    st.session_state.file_context = ""
+    st.success("Chat cleared for your session!")
+    st.rerun()
 
+# Render chat messages
 render_chat_messages(st.session_state.messages)
 handle_user_input()
