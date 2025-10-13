@@ -4,80 +4,92 @@ import PyPDF2
 import docx
 import sqlite3
 import datetime
-import os
 import uuid
+import threading
 
 # ---------------- CONFIG ----------------
 genai.configure(api_key="AIzaSyC59fJluw0VU9RQFnbj0nBzqvKy6j9Mtvo")
-DB_NAME = os.path.join(os.path.dirname(__file__), "chatbot.db")  # Absolute path
+DB_NAME = "chatbot.db"
+db_lock = threading.Lock()  # Thread-safe SQLite access
 
 # ---------------- DATABASE ----------------
 def init_db():
-    if "conn" not in st.session_state:
-        st.session_state.conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-    conn = st.session_state.conn
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS chat_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,
-            role TEXT,
-            message TEXT,
-            timestamp TEXT
-        )
-    """)
-    conn.commit()
+    with db_lock:
+        conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("""
+                       CREATE TABLE IF NOT EXISTS chat_history(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                role TEXT,
+                message TEXT,
+                timestamp TEXT
+                       )
+        """)
+        conn.commit()
+        conn.close()
 
 def migrate_db():
-    conn = st.session_state.conn
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(chat_history)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if "user_id" not in columns:
-        cursor.execute("ALTER TABLE chat_history ADD COLUMN user_id TEXT")
-        cursor.execute("UPDATE chat_history SET user_id='default'")
-        conn.commit()
+    """Add user_id column if missing and assign 'default' to old messages"""
+    with db_lock:
+        conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(chat_history)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if "user_id" not in columns:
+            cursor.execute("ALTER TABLE chat_history ADD COLUMN user_id TEXT")
+            cursor.execute("UPDATE chat_history SET user_id='default'")  # Preserve old messages
+            conn.commit()
+        conn.close()
 
 def save_message(role, message):
     try:
-        conn = st.session_state.conn
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO chat_history (user_id, role, message, timestamp) VALUES (?, ?, ?, ?)",
-            (st.session_state.user_id, role, message, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        )
-        conn.commit()
+        with db_lock:
+            conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO chat_history (user_id, role, message, timestamp) VALUES (?, ?, ?, ?)",
+                (st.session_state.user_id, role, message, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            )
+            conn.commit()
+            conn.close()
     except Exception as e:
         st.error(f"Database error (save_message): {e}")
 
 def load_messages():
+    """Load messages for the current user plus old default messages"""
     try:
-        conn = st.session_state.conn
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(chat_history)")
-        columns = [col[1] for col in cursor.fetchall()]
-        if "user_id" in columns:
-            cursor.execute(
-                "SELECT role, message FROM chat_history WHERE user_id=? OR user_id='default' ORDER BY id ASC",
-                (st.session_state.user_id,)
-            )
-        else:
-            cursor.execute("SELECT role, message FROM chat_history ORDER BY id ASC")
-        messages = cursor.fetchall()
-        return [{"role": role, "content": msg} for role, msg in messages]
+        with db_lock:
+            conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(chat_history)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if "user_id" in columns:
+                cursor.execute(
+                    "SELECT role, message FROM chat_history WHERE user_id=? OR user_id='default' ORDER BY id ASC",
+                    (st.session_state.user_id,)
+                )
+            else:
+                # No user_id column: load all messages
+                cursor.execute("SELECT role, message FROM chat_history ORDER BY id ASC")
+            messages = cursor.fetchall()
+            conn.close()
+            return [{"role": role, "content": msg} for role, msg in messages]
     except Exception as e:
         st.error(f"Database error (load_messages): {e}")
         return []
 
 def clear_chat_history():
     try:
-        conn = st.session_state.conn
-        cursor = conn.cursor()
-        cursor.execute(
-            "DELETE FROM chat_history WHERE user_id=?",
-            (st.session_state.user_id,)
-        )
-        conn.commit()
+        with db_lock:
+            conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM chat_history WHERE user_id=?",
+                (st.session_state.user_id,)
+            )
+            conn.commit()
+            conn.close()
         st.success("Your chat history has been cleared!")
         st.rerun()
     except Exception as e:
@@ -93,24 +105,15 @@ def extract_text_from_docx(file):
     return "\n".join([para.text for para in doc.paragraphs])
 
 def handle_file_upload():
-    if "uploaded_file_content" not in st.session_state:
-        st.session_state.uploaded_file_content = {}
-
     uploaded_file = st.file_uploader("", type=["pdf", "docx"])
     if uploaded_file:
         if uploaded_file.type == "application/pdf":
-            text = extract_text_from_pdf(uploaded_file)
+            return extract_text_from_pdf(uploaded_file)
         elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            text = extract_text_from_docx(uploaded_file)
+            return extract_text_from_docx(uploaded_file)
         else:
             st.warning("Unsupported file type.")
-            return ""
-
-        # Save content per user
-        st.session_state.uploaded_file_content[st.session_state.user_id] = text
-        return text
-    # Return previous file content if exists
-    return st.session_state.uploaded_file_content.get(st.session_state.user_id, "")
+    return ""
 
 # ---------------- STYLING ----------------
 def set_custom_styles():
@@ -182,11 +185,14 @@ def render_chat_messages(messages):
             )
 
 def init_chat():
+    # Assign unique session id
     if "user_id" not in st.session_state:
         st.session_state.user_id = str(uuid.uuid4())
+    # Initialize chat model
     if "chat" not in st.session_state:
         st.session_state.chat = model.start_chat()
         st.session_state.chat.send_message("You are a helpful assistant.")
+    # File context
     if "file_context" not in st.session_state:
         st.session_state.file_context = ""
 
@@ -230,6 +236,7 @@ def handle_user_input():
         save_message("ai", llm_reply)
         typing_placeholder.empty()
 
+        # Reload messages dynamically
         messages_to_render = load_messages()
         render_chat_messages(messages_to_render)
 
@@ -243,7 +250,7 @@ render_title()
 render_file_upload_section()
 init_chat()
 
-# File upload (per user)
+# File upload
 file_text = handle_file_upload()
 if file_text:
     st.session_state.file_context = file_text
@@ -255,7 +262,7 @@ if file_text:
 if st.button("🧹 Clear Chat History"):
     clear_chat_history()
 
-# Load messages dynamically
+# Load messages dynamically each time
 messages_to_render = load_messages()
 render_chat_messages(messages_to_render)
 
