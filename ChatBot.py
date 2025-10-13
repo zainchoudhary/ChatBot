@@ -8,7 +8,7 @@ import uuid
 import threading
 
 # ---------------- CONFIG ----------------
-genai.configure(api_key="AIzaSyC59fJluw0VU9RQFnbj0nBzqvKy6j9Mtvo")
+genai.configure(api_key="YOUR_API_KEY_HERE")
 DB_NAME = "chatbot.db"
 db_lock = threading.Lock()  # Thread-safe SQLite access
 
@@ -18,13 +18,13 @@ def init_db():
         conn = sqlite3.connect(DB_NAME, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("""
-                       CREATE TABLE IF NOT EXISTS chat_history(
+            CREATE TABLE IF NOT EXISTS chat_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT,
                 role TEXT,
                 message TEXT,
                 timestamp TEXT
-                       )
+            )
         """)
         conn.commit()
         conn.close()
