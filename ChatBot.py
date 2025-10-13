@@ -4,67 +4,78 @@ import PyPDF2
 import docx
 import sqlite3
 import datetime
-import os
 import uuid
+import threading
 
 # ---------------- CONFIG ----------------
 genai.configure(api_key="AIzaSyC59fJluw0VU9RQFnbj0nBzqvKy6j9Mtvo")
 DB_NAME = "chatbot.db"
+db_lock = threading.Lock()  # For thread-safe DB access
 
 # ---------------- DATABASE ----------------
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS chat_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,
-            role TEXT,
-            message TEXT,
-            timestamp TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+    with db_lock:
+        conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS chat_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                role TEXT,
+                message TEXT,
+                timestamp TEXT
+            )
+        """)
+        conn.commit()
+        conn.close()
 
 def save_message(role, message):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO chat_history (user_id, role, message, timestamp) VALUES (?, ?, ?, ?)",
-        (st.session_state.user_id, role, message, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    )
-    conn.commit()
-    conn.close()
+    try:
+        with db_lock:
+            conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO chat_history (user_id, role, message, timestamp) VALUES (?, ?, ?, ?)",
+                (st.session_state.user_id, role, message, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            )
+            conn.commit()
+            conn.close()
+    except Exception as e:
+        st.error(f"Database error (save_message): {e}")
 
 def load_messages():
     try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT role, message FROM chat_history WHERE user_id=? ORDER BY id ASC",
-            (st.session_state.user_id,)
-        )
-        messages = cursor.fetchall()
-        conn.close()
-        return [{"role": role, "content": msg} for role, msg in messages]
+        with db_lock:
+            conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT role, message FROM chat_history WHERE user_id=? ORDER BY id ASC",
+                (st.session_state.user_id,)
+            )
+            messages = cursor.fetchall()
+            conn.close()
+            return [{"role": role, "content": msg} for role, msg in messages]
     except Exception as e:
-        print("Error loading messages:", e)
+        st.error(f"Database error (load_messages): {e}")
         return []
 
 def clear_chat_history():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(
-        "DELETE FROM chat_history WHERE user_id=?",
-        (st.session_state.user_id,)
-    )
-    conn.commit()
-    conn.close()
-    st.session_state.messages = []
-    st.session_state.file_context = ""
-    st.success("Your chat history has been cleared!")
-    st.rerun()
+    try:
+        with db_lock:
+            conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM chat_history WHERE user_id=?",
+                (st.session_state.user_id,)
+            )
+            conn.commit()
+            conn.close()
+        st.session_state.messages = []
+        st.session_state.file_context = ""
+        st.success("Your chat history has been cleared!")
+        st.rerun()
+    except Exception as e:
+        st.error(f"Database error (clear_chat_history): {e}")
 
 # ---------------- FILE HANDLING ----------------
 def extract_text_from_pdf(file):
@@ -206,33 +217,22 @@ def handle_user_input():
     user_input = st.chat_input("💬 Ask anything...")
 
     if user_input:
-        # Append to session and save
         st.session_state.messages.append({"role": "user", "content": user_input})
         save_message("user", user_input)
 
-        # Show user message immediately
         render_chat_messages([{"role": "user", "content": user_input}])
-
         typing_placeholder = show_typing_animation()
 
-        # Generate AI response
         response = st.session_state.chat.send_message(user_input)
         llm_reply = response.text
 
         typing_placeholder.empty()
-
         st.session_state.messages.append({"role": "ai", "content": llm_reply})
         save_message("ai", llm_reply)
-
-        # Show AI message
         render_chat_messages([{"role": "ai", "content": llm_reply}])
 
 # ----------------- MAIN -----------------
-if not os.path.exists(DB_NAME):
-    init_db()
-else:
-    init_db()
-
+init_db()
 model = genai.GenerativeModel(model_name="gemini-2.5-flash")
 
 set_custom_styles()
@@ -240,7 +240,6 @@ render_title()
 render_file_upload_section()
 init_chat()
 
-# Handle file upload per user
 file_text = handle_file_upload()
 if file_text:
     st.session_state.file_context = file_text
@@ -248,10 +247,8 @@ if file_text:
     st.success("File content loaded successfully!")
     st.info("Now you can ask questions based on the uploaded file.")
 
-# Clear chat per user session
 if st.button("🧹 Clear Chat History"):
     clear_chat_history()
 
-# Render chat messages
 render_chat_messages(st.session_state.messages)
 handle_user_input()
