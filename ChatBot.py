@@ -5,6 +5,7 @@ import docx
 import sqlite3
 import datetime
 import os
+import uuid
 
 # ---------------- CONFIG ----------------
 genai.configure(api_key="AIzaSyC59fJluw0VU9RQFnbj0nBzqvKy6j9Mtvo")
@@ -17,6 +18,7 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS chat_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
             role TEXT,
             message TEXT,
             timestamp TEXT
@@ -29,11 +31,40 @@ def save_message(role, message):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO chat_history (role, message, timestamp) VALUES (?, ?, ?)",
-        (role, message, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        "INSERT INTO chat_history (user_id, role, message, timestamp) VALUES (?, ?, ?, ?)",
+        (st.session_state.user_id, role, message, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     )
     conn.commit()
     conn.close()
+
+def load_messages():
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT role, message FROM chat_history WHERE user_id=? ORDER BY id ASC",
+            (st.session_state.user_id,)
+        )
+        messages = cursor.fetchall()
+        conn.close()
+        return [{"role": role, "content": msg} for role, msg in messages]
+    except Exception as e:
+        print("Error loading messages:", e)
+        return []
+
+def clear_chat_history():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM chat_history WHERE user_id=?",
+        (st.session_state.user_id,)
+    )
+    conn.commit()
+    conn.close()
+    st.session_state.messages = []
+    st.session_state.file_context = ""
+    st.success("Your chat history has been cleared!")
+    st.rerun()
 
 # ---------------- FILE HANDLING ----------------
 def extract_text_from_pdf(file):
@@ -125,12 +156,20 @@ def render_chat_messages(messages):
             )
 
 def init_chat():
-    # Each new user starts a fresh session
+    # Assign unique ID per user session
+    if "user_id" not in st.session_state:
+        st.session_state.user_id = str(uuid.uuid4())
+
+    # Initialize chat model
     if "chat" not in st.session_state:
         st.session_state.chat = model.start_chat()
         st.session_state.chat.send_message("You are a helpful assistant.")
+
+    # Load this user's messages from database
     if "messages" not in st.session_state:
-        st.session_state.messages = []
+        st.session_state.messages = load_messages()
+
+    # File context per user
     if "file_context" not in st.session_state:
         st.session_state.file_context = ""
 
@@ -167,9 +206,9 @@ def handle_user_input():
     user_input = st.chat_input("💬 Ask anything...")
 
     if user_input:
-        # Append to session only (per-user)
+        # Append to session and save
         st.session_state.messages.append({"role": "user", "content": user_input})
-        save_message("user", user_input)  # optional global log
+        save_message("user", user_input)
 
         # Show user message immediately
         render_chat_messages([{"role": "user", "content": user_input}])
@@ -183,7 +222,7 @@ def handle_user_input():
         typing_placeholder.empty()
 
         st.session_state.messages.append({"role": "ai", "content": llm_reply})
-        save_message("ai", llm_reply)  # optional global log
+        save_message("ai", llm_reply)
 
         # Show AI message
         render_chat_messages([{"role": "ai", "content": llm_reply}])
@@ -209,12 +248,9 @@ if file_text:
     st.success("File content loaded successfully!")
     st.info("Now you can ask questions based on the uploaded file.")
 
-# Clear chat per session (not global)
-if st.button("🧹 Clear Chat"):
-    st.session_state.messages = []
-    st.session_state.file_context = ""
-    st.success("Chat cleared for your session!")
-    st.rerun()
+# Clear chat per user session
+if st.button("🧹 Clear Chat History"):
+    clear_chat_history()
 
 # Render chat messages
 render_chat_messages(st.session_state.messages)
