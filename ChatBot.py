@@ -8,9 +8,10 @@ import uuid
 import threading
 
 # ---------------- CONFIG ----------------
-genai.configure(api_key="YOUR_API_KEY_HERE")
+genai.configure(api_key="AIzaSyC59fJluw0VU9RQFnbj0nBzqvKy6j9Mtvo")
 DB_NAME = "chatbot.db"
-db_lock = threading.Lock()  # Thread-safe SQLite access
+db_lock = threading.Lock()  # For thread-safe DB access
+
 
 # ---------------- DATABASE ----------------
 def init_db():
@@ -18,16 +19,26 @@ def init_db():
         conn = sqlite3.connect(DB_NAME, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS chat_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT,
-                role TEXT,
-                message TEXT,
-                timestamp TEXT
-            )
-        """)
+                       CREATE TABLE IF NOT EXISTS chat_history
+                       (
+                           id
+                           INTEGER
+                           PRIMARY
+                           KEY
+                           AUTOINCREMENT,
+                           user_id
+                           TEXT,
+                           role
+                           TEXT,
+                           message
+                           TEXT,
+                           timestamp
+                           TEXT
+                       )
+                       """)
         conn.commit()
         conn.close()
+
 
 def migrate_db():
     """Add user_id column if missing and assign 'default' to old messages"""
@@ -41,6 +52,7 @@ def migrate_db():
             cursor.execute("UPDATE chat_history SET user_id='default'")  # Preserve old messages
             conn.commit()
         conn.close()
+
 
 def save_message(role, message):
     try:
@@ -56,14 +68,15 @@ def save_message(role, message):
     except Exception as e:
         st.error(f"Database error (save_message): {e}")
 
+
 def load_messages():
-    """Load messages for the current user plus old default messages"""
     try:
         with db_lock:
             conn = sqlite3.connect(DB_NAME, check_same_thread=False)
             cursor = conn.cursor()
             cursor.execute("PRAGMA table_info(chat_history)")
             columns = [col[1] for col in cursor.fetchall()]
+
             if "user_id" in columns:
                 cursor.execute(
                     "SELECT role, message FROM chat_history WHERE user_id=? OR user_id='default' ORDER BY id ASC",
@@ -72,12 +85,14 @@ def load_messages():
             else:
                 # No user_id column: load all messages
                 cursor.execute("SELECT role, message FROM chat_history ORDER BY id ASC")
+
             messages = cursor.fetchall()
             conn.close()
             return [{"role": role, "content": msg} for role, msg in messages]
     except Exception as e:
         st.error(f"Database error (load_messages): {e}")
         return []
+
 
 def clear_chat_history():
     try:
@@ -90,19 +105,24 @@ def clear_chat_history():
             )
             conn.commit()
             conn.close()
+        st.session_state.messages = []
+        st.session_state.file_context = ""
         st.success("Your chat history has been cleared!")
         st.rerun()
     except Exception as e:
         st.error(f"Database error (clear_chat_history): {e}")
+
 
 # ---------------- FILE HANDLING ----------------
 def extract_text_from_pdf(file):
     pdf_reader = PyPDF2.PdfReader(file)
     return "".join(page.extract_text() for page in pdf_reader.pages)
 
+
 def extract_text_from_docx(file):
     doc = docx.Document(file)
     return "\n".join([para.text for para in doc.paragraphs])
+
 
 def handle_file_upload():
     uploaded_file = st.file_uploader("", type=["pdf", "docx"])
@@ -114,6 +134,7 @@ def handle_file_upload():
         else:
             st.warning("Unsupported file type.")
     return ""
+
 
 # ---------------- STYLING ----------------
 def set_custom_styles():
@@ -128,6 +149,7 @@ def set_custom_styles():
         unsafe_allow_html=True
     )
 
+
 def render_title():
     st.markdown(
         """
@@ -140,6 +162,7 @@ def render_title():
         """,
         unsafe_allow_html=True
     )
+
 
 def render_file_upload_section():
     st.markdown(
@@ -155,6 +178,7 @@ def render_file_upload_section():
         """,
         unsafe_allow_html=True
     )
+
 
 # ---------------- CHAT ----------------
 def render_chat_messages(messages):
@@ -184,17 +208,21 @@ def render_chat_messages(messages):
                 unsafe_allow_html=True,
             )
 
+
 def init_chat():
-    # Assign unique session id
     if "user_id" not in st.session_state:
         st.session_state.user_id = str(uuid.uuid4())
-    # Initialize chat model
+
     if "chat" not in st.session_state:
         st.session_state.chat = model.start_chat()
         st.session_state.chat.send_message("You are a helpful assistant.")
-    # File context
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = load_messages()
+
     if "file_context" not in st.session_state:
         st.session_state.file_context = ""
+
 
 def show_typing_animation():
     placeholder = st.empty()
@@ -225,24 +253,29 @@ def show_typing_animation():
     placeholder.markdown(typing_html, unsafe_allow_html=True)
     return placeholder
 
+
 def handle_user_input():
     user_input = st.chat_input("💬 Ask anything...")
+
     if user_input:
+        st.session_state.messages.append({"role": "user", "content": user_input})
         save_message("user", user_input)
 
+        render_chat_messages([{"role": "user", "content": user_input}])
         typing_placeholder = show_typing_animation()
+
         response = st.session_state.chat.send_message(user_input)
         llm_reply = response.text
-        save_message("ai", llm_reply)
-        typing_placeholder.empty()
 
-        # Reload messages dynamically
-        messages_to_render = load_messages()
-        render_chat_messages(messages_to_render)
+        typing_placeholder.empty()
+        st.session_state.messages.append({"role": "ai", "content": llm_reply})
+        save_message("ai", llm_reply)
+        render_chat_messages([{"role": "ai", "content": llm_reply}])
+
 
 # ----------------- MAIN -----------------
 init_db()
-migrate_db()
+migrate_db()  # Ensure old messages are preserved
 model = genai.GenerativeModel(model_name="gemini-2.5-flash")
 
 set_custom_styles()
@@ -250,7 +283,6 @@ render_title()
 render_file_upload_section()
 init_chat()
 
-# File upload
 file_text = handle_file_upload()
 if file_text:
     st.session_state.file_context = file_text
@@ -258,12 +290,8 @@ if file_text:
     st.success("File content loaded successfully!")
     st.info("Now you can ask questions based on the uploaded file.")
 
-# Clear chat
 if st.button("🧹 Clear Chat History"):
     clear_chat_history()
 
-# Load messages dynamically each time
-messages_to_render = load_messages()
-render_chat_messages(messages_to_render)
-
+render_chat_messages(st.session_state.messages)
 handle_user_input()
