@@ -192,7 +192,7 @@ else:
     init_db()
 
 genai.configure(api_key="AIzaSyC59fJluw0VU9RQFnbj0nBzqvKy6j9Mtvo")
-model = genai.GenerativeModel(model_name="gemini-2.5-pro")
+model = genai.GenerativeModel(model_name="gemini-2.5-flash")
 
 set_custom_styles()
 render_title()
