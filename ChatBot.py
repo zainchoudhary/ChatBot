@@ -9,6 +9,7 @@ import uuid
 import html
 import ftfy
 
+
 from streamlit import session_state
 
 # -------------------- DATABASE --------------------
