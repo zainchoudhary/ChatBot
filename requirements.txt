@@ -9,3 +9,4 @@ chromadb
 sentence-transformers
 pinecone-client
 sentence-transformers
+ftfy
