@@ -7,6 +7,7 @@ import datetime
 import os
 import uuid
 import html
+import ftfy
 
 from streamlit import session_state
 
@@ -43,7 +44,7 @@ def load_messages():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute(
-                f"SELECT role, message FROM chat_history WHERE user_id='{session_state.user_id}'"
+                f"SELECT * FROM chat_history WHERE user_id={session_state.user_id}"
         )
         messages = cursor.fetchall()
         conn.close()
@@ -82,7 +83,15 @@ def handle_file_upload():
             st.warning("Unsupported file type.")
     return ""
 
-
+# -------------------- STYLING --------------------
+def set_custom_styles():
+    st.markdown("""
+        <style>
+        html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
+            background-color: black !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
 def render_title():
     st.markdown("""
@@ -108,14 +117,13 @@ def render_file_upload_section():
 def render_chat_messages(messages):
     for msg in messages:
         safe_text = html.escape(msg["content"])  # escape HTML
+
         if msg["role"] == "user":
             st.markdown(f"""
                 <div style="display: flex; justify-content: flex-end; margin: 10px 0;">
                     <div style="background-color: #C7C7C7; color:black; padding:10px 15px;
                                 border-radius:15px; max-width:60%; word-wrap:break-word;">
                         {safe_text}
-                    </div>
-                </div>
             """, unsafe_allow_html=True)
         else:
             st.markdown(f"""
@@ -123,8 +131,6 @@ def render_chat_messages(messages):
                     <div style="background-color: #3E494D; color:white; padding:10px 15px;
                                 border-radius:15px; max-width:60%; word-wrap:break-word;">
                         {safe_text}
-                    </div>
-                </div>
             """, unsafe_allow_html=True)
 
 def init_chat():
@@ -180,6 +186,7 @@ def handle_user_input():
 if "user_id" not in st.session_state:
     st.session_state.user_id = str(uuid.uuid4())
 
+# -------------------- INITIALIZATION --------------------
 if not os.path.exists(DB_PATH):
     init_db()
 else:
@@ -188,6 +195,7 @@ else:
 genai.configure(api_key="AIzaSyCnKIaRkU4yPHfqaaCYLdKIJ7ePj7zdR58")
 model = genai.GenerativeModel(model_name="gemini-2.5-flash")
 
+set_custom_styles()
 render_title()
 render_file_upload_section()
 init_chat()
@@ -195,7 +203,10 @@ init_chat()
 file_text = handle_file_upload()
 if file_text:
     st.session_state.file_context = file_text
-    st.session_state.chat.send_message("Here is a document the user uploaded:\n\n" + file_text[:8000])
+    safe_text = ftfy.fix_text(file_text)
+    st.session_state.chat.send_message(
+        "Here is a document the user uploaded:\n\n" + safe_text[:8000]
+    )
     st.success("File content loaded successfully!")
     st.info("Now you can ask questions based on the uploaded file.")
 
