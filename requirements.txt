@@ -1,4 +1,5 @@
 streamlit
+langchain-community
 google-generativeai
 PyPDF2
 python-docx
@@ -10,3 +11,4 @@ sentence-transformers
 pinecone-client
 sentence-transformers
 ftfy
+pypdf
