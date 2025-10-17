@@ -1,20 +1,15 @@
 import streamlit as st
 import google.generativeai as genai
-import PyPDF2
-import docx
 import sqlite3
 import datetime
-import os
 import uuid
 import html
-import ftfy
+import os
+from rag_pipeline import add_file_to_rag, query_rag
 
-
-from streamlit import session_state
-
-# -------------------- DATABASE --------------------
 DB_PATH = "chatbot.db"
 
+# -------------------- DATABASE --------------------
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -45,11 +40,11 @@ def load_messages():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute(
-                f"SELECT * FROM chat_history WHERE user_id={session_state.user_id}"
+            "SELECT * FROM chat_history WHERE user_id=?", (st.session_state.user_id,)
         )
         messages = cursor.fetchall()
         conn.close()
-        return [{"role": role, "content": msg} for role, msg in messages]
+        return [{"role": row[2], "content": row[3]} for row in messages]
     except Exception as e:
         print("Error loading messages:", e)
         return []
@@ -63,26 +58,6 @@ def clear_chat_history():
     st.session_state.messages = []
     st.success("Chat history cleared!")
     st.rerun()
-
-# -------------------- FILE HANDLING --------------------
-def extract_text_from_pdf(file):
-    pdf_reader = PyPDF2.PdfReader(file)
-    return "".join(page.extract_text() for page in pdf_reader.pages)
-
-def extract_text_from_docx(file):
-    doc = docx.Document(file)
-    return "\n".join([para.text for para in doc.paragraphs])
-
-def handle_file_upload():
-    uploaded_file = st.file_uploader("", type=["pdf", "docx"])
-    if uploaded_file:
-        if uploaded_file.type == "application/pdf":
-            return extract_text_from_pdf(uploaded_file)
-        elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            return extract_text_from_docx(uploaded_file)
-        else:
-            st.warning("Unsupported file type.")
-    return ""
 
 # -------------------- STYLING --------------------
 def set_custom_styles():
@@ -117,14 +92,15 @@ def render_file_upload_section():
 # -------------------- CHAT --------------------
 def render_chat_messages(messages):
     for msg in messages:
-        safe_text = html.escape(msg["content"])  # escape HTML
-
+        safe_text = html.escape(msg["content"])
         if msg["role"] == "user":
             st.markdown(f"""
                 <div style="display: flex; justify-content: flex-end; margin: 10px 0;">
                     <div style="background-color: #C7C7C7; color:black; padding:10px 15px;
                                 border-radius:15px; max-width:60%; word-wrap:break-word;">
                         {safe_text}
+                    </div>
+                </div>
             """, unsafe_allow_html=True)
         else:
             st.markdown(f"""
@@ -132,6 +108,8 @@ def render_chat_messages(messages):
                     <div style="background-color: #3E494D; color:white; padding:10px 15px;
                                 border-radius:15px; max-width:60%; word-wrap:break-word;">
                         {safe_text}
+                    </div>
+                </div>
             """, unsafe_allow_html=True)
 
 def init_chat():
@@ -148,19 +126,10 @@ def show_typing_animation():
     typing_html = """
     <div style="display: flex; justify-content: flex-start; margin: 10px 0;">
         <div style="display: inline-flex; align-items: center; background-color: #3E494D;
-                    color: white; padding: 10px 15px; border-radius: 15px; max-width: 60%;
-                    word-wrap: break-word;">
-            <div class="typing-indicator" style="display: flex; gap: 4px;">
-                <span style="width: 8px; height: 8px; background-color: #ccc; border-radius: 50%;
-                            display: inline-block; animation: blink 1s infinite 0s;"></span>
-                <span style="width: 8px; height: 8px; background-color: #ccc; border-radius: 50%;
-                            display: inline-block; animation: blink 1s infinite 0.2s;"></span>
-                <span style="width: 8px; height: 8px; background-color: #ccc; border-radius: 50%;
-                            display: inline-block; animation: blink 1s infinite 0.4s;"></span>
-
-    <style>
-    @keyframes blink { 0% {opacity:0.2;} 20% {opacity:1;} 100% {opacity:0.2;} }
-    </style>
+                    color: white; padding: 10px 15px; border-radius: 15px;">
+            <span>...</span>
+        </div>
+    </div>
     """
     placeholder.markdown(typing_html, unsafe_allow_html=True)
     return placeholder
@@ -170,44 +139,67 @@ def handle_user_input():
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
         save_message("user", user_input)
-        st.rerun()
+        # st.rerun()
 
     if st.session_state.messages:
         last_msg = st.session_state.messages[-1]
         if last_msg["role"] == "user":
             typing_placeholder = show_typing_animation()
-            response = st.session_state.chat.send_message(last_msg["content"])
-            llm_reply = response.text
-            typing_placeholder.empty()
-            st.session_state.messages.append({"role": "ai", "content": llm_reply})
-            save_message("ai", llm_reply)
-            st.rerun()
+            if uploaded_file:
+                documents_list = query_rag(last_msg["content"])
+                user_query = last_msg["content"]
+                context = "\n\n".join(documents_list)  # merge chunks into one string
+
+                prompt = f"""
+                You are an intelligent assistant. Use the provided context to answer the question.
+
+If the context is incomplete, give the best possible answer based on available information.
+                ```
+                {context}
+                ```
+                
+                User question:
+                ```
+                {user_query}
+                ```
+                """
+                response = st.session_state.chat.send_message(prompt)
+                llm_reply = response.text
+                typing_placeholder.empty()
+                st.session_state.messages.append({"role": "ai", "content": llm_reply})
+                save_message("ai", llm_reply)
+                st.rerun()
+            else:
+                response = st.session_state.chat.send_message(last_msg["content"])
+                llm_reply = response.text
+                typing_placeholder.empty()
+                st.session_state.messages.append({"role": "ai", "content": llm_reply})
+                save_message("ai", llm_reply)
+                st.rerun()
 
 # -------------------- USER IDENTIFICATION --------------------
 if "user_id" not in st.session_state:
     st.session_state.user_id = str(uuid.uuid4())
 
 # -------------------- INITIALIZATION --------------------
-if not os.path.exists(DB_PATH):
-    init_db()
-else:
-    init_db()
+init_db()
 
 genai.configure(api_key="AIzaSyCnKIaRkU4yPHfqaaCYLdKIJ7ePj7zdR58")
 model = genai.GenerativeModel(model_name="gemini-2.5-flash")
-
 set_custom_styles()
 render_title()
 render_file_upload_section()
 init_chat()
 
-file_text = handle_file_upload()
-if file_text:
-    st.session_state.file_context = file_text
-    safe_text = ftfy.fix_text(file_text)
-    st.session_state.chat.send_message(
-        "Here is a document the user uploaded:\n\n" + safe_text[:8000]
-    )
+uploaded_file = st.file_uploader("Upload File", type=["pdf", "docx"], key="file_upload")
+
+if uploaded_file:
+    temp_path = os.path.join("temp_uploads", uploaded_file.name)
+
+    with open(temp_path, "wb") as f:
+        f.write(uploaded_file.read())
+
+    add_file_to_rag(temp_path)
     st.success("File content loaded successfully!")
     st.info("Now you can ask questions based on the uploaded file.")
 
