@@ -9,6 +9,9 @@ from rag_pipeline import add_file_to_rag, query_rag
 
 DB_PATH = "chatbot.db"
 
+genai.configure(api_key="AIzaSyCnKIaRkU4yPHfqaaCYLdKIJ7ePj7zdR58")
+model = genai.GenerativeModel(model_name="gemini-2.5-flash")
+
 # -------------------- DATABASE --------------------
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -184,8 +187,7 @@ if "user_id" not in st.session_state:
 # -------------------- INITIALIZATION --------------------
 init_db()
 
-genai.configure(api_key="AIzaSyCnKIaRkU4yPHfqaaCYLdKIJ7ePj7zdR58")
-model = genai.GenerativeModel(model_name="gemini-2.5-flash")
+
 set_custom_styles()
 render_title()
 render_file_upload_section()
