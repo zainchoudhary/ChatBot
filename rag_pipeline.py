@@ -1,6 +1,6 @@
 from typing import List
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.document_loaders import UnstructuredWordDocumentLoader, PyPDFLoader
+from langchain_community.document_loaders import UnstructuredWordDocumentLoader, PyPDFLoader
 from sentence_transformers import SentenceTransformer
 import chromadb
 import uuid
