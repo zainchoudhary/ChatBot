@@ -1,12 +1,10 @@
 from typing import List
-
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.document_loaders import UnstructuredWordDocumentLoader, PyPDFLoader
 from sentence_transformers import SentenceTransformer
 import chromadb
 import uuid
 import os
-
 
 chroma_client = chromadb.PersistentClient(path="chroma_db")
 collection = chroma_client.get_or_create_collection(name="rag_collection")
@@ -23,20 +21,19 @@ def extract_text(file_path):
         raise ValueError(f"Unsupported file type: {ext}")
     return loader.load()
 
-def split_text(documents: List[str], chunk_size=50000, chunk_overlap=400):
+def split_text(documents: List[str], chunk_size=300, chunk_overlap=50):
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap
     )
-    print(text_splitter.split_documents(documents))
     return text_splitter.split_documents(documents)
-
 
 def add_file_to_rag(file_path):
     docs = extract_text(file_path)
+    print("After Extraction : ",docs)
     chunks = split_text(docs)
+    print("The Chunks That Splited From Extracted Document : ",chunks)
 
-    # safe text extraction
 
     texts, metadatas, ids = [], [], []
     for i, chunk in enumerate(chunks):
@@ -53,11 +50,9 @@ def add_file_to_rag(file_path):
         print(f"No valid text found in {file_path}")
         return
 
-    # optional: truncate very long chunks
     MAX_CHUNK_LENGTH = 2000
     texts = [t[:MAX_CHUNK_LENGTH] for t in texts]
 
-    # generate embeddings safely
     valid_texts, valid_metadatas, valid_ids, embeddings = [], [], [], []
     for t, m, id_ in zip(texts, metadatas, ids):
         try:
@@ -74,7 +69,6 @@ def add_file_to_rag(file_path):
         print(f"No valid embeddings for {file_path}")
         return
 
-    # Add to ChromaDB
     collection.add(
         documents=valid_texts,
         metadatas=valid_metadatas,
@@ -84,24 +78,14 @@ def add_file_to_rag(file_path):
 
     print(f"Added {len(valid_texts)} chunks from {file_path} to ChromaDB")
 
-
-def query_rag(query, n_results=5):
+def query_rag(query, n_results=8):
     query_embedding = model.encode([query], convert_to_numpy=True).tolist()
-
     results = collection.query(
         query_embeddings=query_embedding,
         n_results=n_results
     )
+    all_chunks = results.get('documents', [])[0]
 
-    all_docs = []
-    for docs in results['documents']:
-        all_docs.extend(docs)
-
-    return all_docs
-
-
-path = r'C:\Users\Zam Technologies\Desktop\ChatBot Project\temp_uploads\Benefits.pdf'
-extract_text(path)
-
-
-
+    print("Retrieved chunks:", all_chunks)
+    print("Number of chunks returned:", len(all_chunks))  # ✅
+    return all_chunks

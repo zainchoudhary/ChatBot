@@ -42,9 +42,7 @@ def load_messages():
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM chat_history WHERE user_id=?", (st.session_state.user_id,)
-        )
+        cursor.execute("SELECT * FROM chat_history WHERE user_id=?", (st.session_state.user_id,))
         messages = cursor.fetchall()
         conn.close()
         return [{"role": row[2], "content": row[3]} for row in messages]
@@ -55,14 +53,13 @@ def load_messages():
 def clear_chat_history():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM chat_history WHERE user_id = ?", (st.session_state.user_id,))
+    cursor.execute("DELETE FROM chat_history WHERE user_id=?", (st.session_state.user_id,))
     conn.commit()
     conn.close()
     st.session_state.messages = []
-    st.success("Chat history cleared!")
+    st.success("Chat and uploaded file cleared!")
     st.rerun()
 
-# -------------------- STYLING --------------------
 def set_custom_styles():
     st.markdown("""
         <style>
@@ -102,8 +99,6 @@ def render_chat_messages(messages):
                     <div style="background-color: #C7C7C7; color:black; padding:10px 15px;
                                 border-radius:15px; max-width:60%; word-wrap:break-word;">
                         {safe_text}
-                    </div>
-                </div>
             """, unsafe_allow_html=True)
         else:
             st.markdown(f"""
@@ -123,6 +118,8 @@ def init_chat():
         st.session_state.messages = []
     if "file_context" not in st.session_state:
         st.session_state.file_context = ""
+    if "uploaded_file" not in st.session_state:
+        st.session_state.uploaded_file = None
 
 def show_typing_animation():
     placeholder = st.empty()
@@ -142,43 +139,47 @@ def handle_user_input():
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
         save_message("user", user_input)
-        # st.rerun()
 
-    if st.session_state.messages:
         last_msg = st.session_state.messages[-1]
         if last_msg["role"] == "user":
             typing_placeholder = show_typing_animation()
-            if uploaded_file:
-                documents_list = query_rag(last_msg["content"])
-                user_query = last_msg["content"]
-                context = "\n\n".join(documents_list)  # merge chunks into one string
+            context = ""
 
+            # ✅ Use RAG only if a file is uploaded
+            print("bhjgjkgjjhj", st.session_state.uploaded_file)
+            if st.session_state.get("uploaded_file"):
+                documents_list = query_rag(last_msg["content"], n_results=5)
+                if documents_list:
+                    context = "\n\n".join(documents_list)
+
+            # ✅ Build prompt
+            if context:
                 prompt = f"""
-                You are an intelligent assistant. Use the provided context to answer the question.
-
-If the context is incomplete, give the best possible answer based on available information.
-                ```
+                You are an intelligent assistant.Follow the pattern that is given below.
+                if the document is provided by the user and the question is related to that document then you should have to give the answer of that question from that document and
+                if the user ask you the irrelevant question that is not relevant to that document then you do not have right to say that you have dont any information about it instead it 
+                you must give the answer of that type of question which is not relevant to that document by searching from the google seach engine.   
+                in short, You should have to answer all the questions.
+                context:
+                ``` 
                 {context}
                 ```
-                
+
                 User question:
                 ```
-                {user_query}
+                {last_msg['content']}
                 ```
                 """
-                response = st.session_state.chat.send_message(prompt)
-                llm_reply = response.text
-                typing_placeholder.empty()
-                st.session_state.messages.append({"role": "ai", "content": llm_reply})
-                save_message("ai", llm_reply)
-                st.rerun()
             else:
-                response = st.session_state.chat.send_message(last_msg["content"])
-                llm_reply = response.text
-                typing_placeholder.empty()
-                st.session_state.messages.append({"role": "ai", "content": llm_reply})
-                save_message("ai", llm_reply)
-                st.rerun()
+                prompt = last_msg['content']
+
+            response = st.session_state.chat.send_message(prompt)
+            llm_reply = response.text
+
+            typing_placeholder.empty()
+            st.session_state.messages.append({"role": "ai", "content": llm_reply})
+            save_message("ai", llm_reply)
+            st.rerun()
 
 # -------------------- USER IDENTIFICATION --------------------
 if "user_id" not in st.session_state:
@@ -186,8 +187,6 @@ if "user_id" not in st.session_state:
 
 # -------------------- INITIALIZATION --------------------
 init_db()
-
-
 set_custom_styles()
 render_title()
 render_file_upload_section()
@@ -196,14 +195,18 @@ init_chat()
 uploaded_file = st.file_uploader("Upload File", type=["pdf", "docx"], key="file_upload")
 
 if uploaded_file:
+    st.session_state.uploaded_file = uploaded_file  # ✅ Track file in session_state
+    os.makedirs("temp_uploads", exist_ok=True)
     temp_path = os.path.join("temp_uploads", uploaded_file.name)
-
     with open(temp_path, "wb") as f:
         f.write(uploaded_file.read())
 
     add_file_to_rag(temp_path)
     st.success("File content loaded successfully!")
-    st.info("Now you can ask questions based on the uploaded file.")
+    st.info("You can now ask questions based on the uploaded file.")
+
+else:
+    st.session_state.uploaded_file = False
 
 if st.button("🧹 Clear Chat History"):
     clear_chat_history()
