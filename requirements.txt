@@ -1,5 +1,7 @@
 streamlit
 langchain-community
+langchain.document_loaders
+unstructured
 google-generativeai
 PyPDF2
 python-docx
@@ -11,4 +13,6 @@ sentence-transformers
 pinecone-client
 sentence-transformers
 ftfy
+pypdfunstructured
+python-docx
 pypdf
