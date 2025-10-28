@@ -211,5 +211,76 @@ else:
 if st.button("🧹 Clear Chat History"):
     clear_chat_history()
 
+import streamlit as st
+import time
+import io
+import tempfile
+from fpdf import FPDF
+from docx import Document
+
+# Track if the export button was clicked
+if "show_export_options" not in st.session_state:
+    st.session_state.show_export_options = False
+
+
+def export_chat_button():
+    # --- Left-aligned Export Chat button ---
+    if st.button("📤 Export Chat", key="export_chat_btn"):
+        st.session_state.show_export_options = True
+
+        # If no chat, show temporary warning
+        if not st.session_state.messages:
+            placeholder = st.empty()
+            placeholder.warning("No chat to export")
+            time.sleep(1)
+            placeholder.empty()
+            st.session_state.show_export_options = False
+
+    # --- Show PDF/Word selection and download only if button clicked and chat exists ---
+    if st.session_state.show_export_options and st.session_state.messages:
+        # Right-aligned container
+        st.markdown('<div style="display:flex; justify-content:flex-end; margin-top:10px;">', unsafe_allow_html=True)
+
+        format_choice = st.radio("Select export format:", ["PDF", "Word"], key="export_format", horizontal=True)
+
+        if st.button("Confirm Export", key="export_confirm_btn"):
+            if format_choice == "PDF":
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.set_auto_page_break(auto=True, margin=15)
+                pdf.set_font("Arial", size=12)
+                for msg in st.session_state.messages:
+                    role = "User" if msg["role"] == "user" else "AI"
+                    pdf.multi_cell(0, 8, f"{role}: {msg['content']}\n")
+                    pdf.ln(1)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                    pdf.output(tmp_file.name)
+                    tmp_file.seek(0)
+                    pdf_bytes = tmp_file.read()
+                st.download_button(
+                    label="Download PDF",
+                    data=pdf_bytes,
+                    file_name="chat_history.pdf",
+                    mime="application/pdf"
+                )
+            else:
+                doc = Document()
+                for msg in st.session_state.messages:
+                    role = "User" if msg["role"] == "user" else "AI"
+                    doc.add_paragraph(f"{role}: {msg['content']}")
+                doc_buffer = io.BytesIO()
+                doc.save(doc_buffer)
+                doc_buffer.seek(0)
+                st.download_button(
+                    label="Download Word",
+                    data=doc_buffer,
+                    file_name="chat_history.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+export_chat_button()
+
 render_chat_messages(st.session_state.messages)
 handle_user_input()
