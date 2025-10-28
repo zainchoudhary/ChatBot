@@ -10,4 +10,5 @@ faiss-cpu
 chromadb
 sentence-transformers
 pinecone-client
+fpdf
 ftfy
